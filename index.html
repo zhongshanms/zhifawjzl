@@ -385,7 +385,11 @@ function getFactoryGroup(code) {
 function excelSerialToDate(serial) {
     if (serial == null) return null;
     if (serial instanceof Date) {
-        return serial.toISOString().split('T')[0];
+        // 使用本地时间格式化，避免 toISOString() 的时区偏移问题
+        const y = serial.getFullYear();
+        const m = String(serial.getMonth() + 1).padStart(2, '0');
+        const d = String(serial.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
     }
     if (typeof serial === 'number' && serial > 40000 && serial < 100000) {
         // Excel serial: days since 1899-12-30
@@ -395,9 +399,14 @@ function excelSerialToDate(serial) {
     if (typeof serial === 'string') {
         const trimmed = serial.trim();
         // Try to parse as date string
-        if (/^\d{4}[-\/]\d{1,2}[-\/]\d{1,2}$/.test(trimmed)) {
+        if (/^\d{4}[-\/]\d{1,2}[-\/]\d{1,2}/.test(trimmed)) {
             const d = new Date(trimmed);
-            if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+            if (!isNaN(d.getTime())) {
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const dd = String(d.getDate()).padStart(2, '0');
+                return `${y}-${m}-${dd}`;
+            }
         }
         // Try to parse number string
         const n = Number(trimmed);
@@ -456,25 +465,30 @@ function getDtSheetData(ws) {
     return XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, cellDates: true, raw: true });
 }
 
-// 模糊匹配列名
+// 表头标准化：去除换行符和多余空格
+function normalizeHeader(h) {
+    if (h == null) return '';
+    return String(h).replace(/[\n\r]/g, '').replace(/ /g, '').trim();
+}
+
+// 模糊匹配列名（按关键词优先级）
 function findColumnIndex(headers, keywords) {
     if (!headers || headers.length === 0) return -1;
-    // 先精确匹配
-    for (let i = 0; i < headers.length; i++) {
-        const h = headers[i];
-        if (h == null) continue;
-        const hs = String(h).trim();
-        for (const kw of keywords) {
-            if (hs === kw) return i;
+    const normalized = headers.map(h => normalizeHeader(h));
+    // 精确匹配 - 按关键词优先级（keywords靠前的优先）
+    for (const kw of keywords) {
+        const kwNorm = kw.replace(/ /g, '').trim();
+        for (let i = 0; i < normalized.length; i++) {
+            if (normalized[i] === kwNorm) return i;
         }
     }
-    // 再包含匹配
-    for (let i = 0; i < headers.length; i++) {
-        const h = headers[i];
-        if (h == null) continue;
-        const hs = String(h).trim();
-        for (const kw of keywords) {
-            if (hs.includes(kw) || kw.includes(hs)) return i;
+    // 模糊匹配 - 按关键词优先级
+    for (const kw of keywords) {
+        const kwNorm = kw.replace(/ /g, '').trim();
+        for (let i = 0; i < normalized.length; i++) {
+            const nh = normalized[i];
+            if (!nh) continue;
+            if (nh.includes(kwNorm) || kwNorm.includes(nh)) return i;
         }
     }
     return -1;
@@ -566,8 +580,8 @@ function processFiles() {
         // Row 0,1 = merged headers, Row 2 = real headers, Data from index 3
         const zmHeaders = zmData[2]; // Row 3 (0-indexed: 2)
         const zmFbaCol = findColumnIndex(zmHeaders, ['FBA单号']);
-        const zmDateCol = findColumnIndex(zmHeaders, ['提货日期']);
-        const zmFallbackCol = findColumnIndex(zmHeaders, ['计划规定出货日期', '预计货好日期']);
+        const zmDateCol = findColumnIndex(zmHeaders, ['提货日期', '工厂实际出货日期']);
+        const zmFallbackCol = findColumnIndex(zmHeaders, ['计划规定出货日期']);
         const zmFactoryCol = findColumnIndex(zmHeaders, ['供应商代码', '工厂代码']);
 
         if (zmFbaCol < 0) { log('中山门锁直发未找到FBA单号列', 'error'); finishProcess(false); return; }
