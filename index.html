@@ -734,8 +734,8 @@ function processFiles() {
         log('正在生成下载...', 'info');
 
         // 生成文件名
-        const randNum = String(Math.floor(1000 + Math.random() * 9000));
-        const outFileName = `直发任务数据${randNum}.xlsx`;
+        const randNum = String(Math.floor(10000000 + Math.random() * 90000000));
+        const outFileName = `FBA工厂直发${randNum}.xlsx`;
 
         // 触发下载
         const wbout = XLSX.write(wbOut, { bookType: 'xlsx', type: 'array' });
