@@ -392,9 +392,12 @@ function excelSerialToDate(serial) {
         return `${y}-${m}-${d}`;
     }
     if (typeof serial === 'number' && serial > 40000 && serial < 100000) {
-        // Excel serial: days since 1899-12-30
-        const d = new Date(Date.UTC(1899, 11, 30 + serial));
-        return d.toISOString().split('T')[0];
+        // Excel serial: days since 1899-12-30，用本地时间避免时区偏移
+        const d = new Date(1899, 11, 30 + Math.round(serial));
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${dd}`;
     }
     if (typeof serial === 'string') {
         const trimmed = serial.trim();
@@ -411,8 +414,11 @@ function excelSerialToDate(serial) {
         // Try to parse number string
         const n = Number(trimmed);
         if (!isNaN(n) && n > 40000 && n < 100000) {
-            const d = new Date(Date.UTC(1899, 11, 30 + Math.floor(n)));
-            return d.toISOString().split('T')[0];
+            const d = new Date(1899, 11, 30 + Math.round(n));
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${dd}`;
         }
         return trimmed;
     }
