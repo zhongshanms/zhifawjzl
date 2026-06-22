@@ -436,7 +436,8 @@ function excelSerialToDate(serial) {
 }
 
 // 从对接表构建查询字典
-function buildLookupTable(data, dataStartIdx, fbaCol, dateCol, fallbackCol, factoryCol) {
+// dateCols: 按优先级排列的日期列索引数组，依次尝试直到取到有效日期
+function buildLookupTable(data, dataStartIdx, fbaCol, dateCols, factoryCol) {
     const lookup = new Map();
     for (let i = dataStartIdx; i < data.length; i++) {
         const row = data[i];
@@ -444,13 +445,12 @@ function buildLookupTable(data, dataStartIdx, fbaCol, dateCol, fallbackCol, fact
         const fbaKey = String(row[fbaCol]).trim();
         if (!fbaKey) continue;
 
-        // 优先取提货日期
-        let dateVal = row[dateCol];
-        let dateStr = excelSerialToDate(dateVal);
-
-        // 提货日期为空则用备选
-        if (!dateStr && fallbackCol !== undefined && fallbackCol !== null) {
-            dateStr = excelSerialToDate(row[fallbackCol]);
+        // 按优先级依次尝试日期列
+        let dateStr = null;
+        for (const dc of dateCols) {
+            if (dc < 0) continue;
+            dateStr = excelSerialToDate(row[dc]);
+            if (dateStr) break; // 取到有效日期就停止
         }
 
         let factory = null;
@@ -593,14 +593,17 @@ function processFiles() {
         // Row 0,1 = merged headers, Row 2 = real headers, Data from index 3
         const zmHeaders = zmData[2]; // Row 3 (0-indexed: 2)
         const zmFbaCol = findColumnIndex(zmHeaders, ['FBA单号']);
-        const zmDateCol = findColumnIndex(zmHeaders, ['提货日期', '工厂实际出货日期']);
-        const zmFallbackCol = findColumnIndex(zmHeaders, ['计划规定出货日期']);
+        // 三级级联：提货日期 → 工厂实际出货日期 → 计划规定出货日期
+        const zmPickupCol = findColumnIndex(zmHeaders, ['提货日期']);
+        const zmActualCol = findColumnIndex(zmHeaders, ['工厂实际出货日期']);
+        const zmPlanCol = findColumnIndex(zmHeaders, ['计划规定出货日期']);
         const zmFactoryCol = findColumnIndex(zmHeaders, ['供应商代码', '工厂代码']);
 
         if (zmFbaCol < 0) { log('中山门锁直发未找到FBA单号列', 'error'); finishProcess(false); return; }
-        log(`中山门锁直发: FBA单号列=${zmFbaCol+1}, 提货日期列=${zmDateCol+1}, 备选列=${zmFallbackCol+1}`, 'info');
+        log(`中山门锁直发: FBA单号列=${zmFbaCol+1}, 提货日期列=${zmPickupCol+1}, 工厂实际出货日期列=${zmActualCol+1}, 计划规定出货日期列=${zmPlanCol+1}`, 'info');
 
-        const lookupZm = buildLookupTable(zmData, 3, zmFbaCol, zmDateCol, zmFallbackCol, zmFactoryCol);
+        const zmDateCols = [zmPickupCol, zmActualCol, zmPlanCol].filter(c => c >= 0);
+        const lookupZm = buildLookupTable(zmData, 3, zmFbaCol, zmDateCols, zmFactoryCol);
         log(`中山门锁直发: 构建 ${lookupZm.size} 条匹配记录`, 'info');
 
         // 3b. 中山灯具直发 (删前1行)
@@ -610,12 +613,14 @@ function processFiles() {
         if (zmDjData.length < 2) { log('中山灯具直发数据不足', 'error'); finishProcess(false); return; }
         const zmDjHeaders = zmDjData[1];
         const zmDjFbaCol = findColumnIndex(zmDjHeaders, ['FBA单号']);
-        const zmDjDateCol = findColumnIndex(zmDjHeaders, ['提货日期']);
-        const zmDjFallbackCol = findColumnIndex(zmDjHeaders, ['工厂预计出货日期']);
+        // 两级级联：提货日期 → 工厂预计出货日期
+        const zmDjPickupCol = findColumnIndex(zmDjHeaders, ['提货日期']);
+        const zmDjExpectedCol = findColumnIndex(zmDjHeaders, ['工厂预计出货日期']);
         const zmDjFactoryCol = findColumnIndex(zmDjHeaders, ['仓库简称']);
 
         if (zmDjFbaCol < 0) { log('中山灯具直发未找到FBA单号列', 'error'); finishProcess(false); return; }
-        const lookupZmDj = buildLookupTable(zmDjData, 2, zmDjFbaCol, zmDjDateCol, zmDjFallbackCol, zmDjFactoryCol);
+        const zmDjDateCols = [zmDjPickupCol, zmDjExpectedCol].filter(c => c >= 0);
+        const lookupZmDj = buildLookupTable(zmDjData, 2, zmDjFbaCol, zmDjDateCols, zmDjFactoryCol);
         log(`中山灯具直发: 构建 ${lookupZmDj.size} 条匹配记录`, 'info');
 
         // 3c. 江门直发 (删前1行)
@@ -625,12 +630,14 @@ function processFiles() {
         if (jmData.length < 2) { log('江门直发数据不足', 'error'); finishProcess(false); return; }
         const jmHeaders = jmData[1];
         const jmFbaCol = findColumnIndex(jmHeaders, ['FBA单号']);
-        const jmDateCol = findColumnIndex(jmHeaders, ['提货日期']);
-        const jmFallbackCol = findColumnIndex(jmHeaders, ['工厂预计出货日期']);
+        // 两级级联：提货日期 → 工厂预计出货日期
+        const jmPickupCol = findColumnIndex(jmHeaders, ['提货日期']);
+        const jmExpectedCol = findColumnIndex(jmHeaders, ['工厂预计出货日期']);
         const jmFactoryCol = findColumnIndex(jmHeaders, ['仓库简称']);
 
         if (jmFbaCol < 0) { log('江门直发未找到FBA单号列', 'error'); finishProcess(false); return; }
-        const lookupJm = buildLookupTable(jmData, 2, jmFbaCol, jmDateCol, jmFallbackCol, jmFactoryCol);
+        const jmDateCols = [jmPickupCol, jmExpectedCol].filter(c => c >= 0);
+        const lookupJm = buildLookupTable(jmData, 2, jmFbaCol, jmDateCols, jmFactoryCol);
         log(`江门直发: 构建 ${lookupJm.size} 条匹配记录`, 'info');
 
         // ---- Step 4: 构建新数据表 ----
