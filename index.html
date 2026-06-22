@@ -385,11 +385,18 @@ function getFactoryGroup(code) {
 function excelSerialToDate(serial) {
     if (serial == null) return null;
     if (serial instanceof Date) {
-        // 使用本地时间格式化，避免 toISOString() 的时区偏移问题
-        const y = serial.getFullYear();
-        const m = String(serial.getMonth() + 1).padStart(2, '0');
-        const d = String(serial.getDate()).padStart(2, '0');
-        return `${y}-${m}-${d}`;
+        // SheetJS 读取日期时可能因浮点精度产生微小时间偏移
+        // 例如 2026-07-10 00:00:00 被读取为 2026-07-09 23:59:17
+        // 修正：当时间接近午夜（23:00之后）时进位到下一天
+        const d = new Date(serial);
+        if (d.getHours() >= 23) {
+            d.setDate(d.getDate() + 1);
+        }
+        d.setHours(0, 0, 0, 0);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${dd}`;
     }
     if (typeof serial === 'number' && serial > 40000 && serial < 100000) {
         // Excel serial: days since 1899-12-30，用本地时间避免时区偏移
