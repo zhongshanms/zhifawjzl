@@ -435,6 +435,57 @@ function excelSerialToDate(serial) {
     return null;
 }
 
+// 解析原始单元格值为 Date 对象
+function parseDateValue(value) {
+    if (value == null) return null;
+    if (value instanceof Date) {
+        const d = new Date(value);
+        if (d.getHours() >= 23) {
+            d.setDate(d.getDate() + 1);
+        }
+        d.setHours(0, 0, 0, 0);
+        return d;
+    }
+    if (typeof value === 'number' && value > 40000 && value < 100000) {
+        return new Date(1899, 11, 30 + Math.round(value));
+    }
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (/^\d{4}[-\/]\d{1,2}[-\/]\d{1,2}/.test(trimmed)) {
+            const d = new Date(trimmed);
+            if (!isNaN(d.getTime())) return d;
+        }
+        const n = Number(trimmed);
+        if (!isNaN(n) && n > 40000 && n < 100000) {
+            return new Date(1899, 11, 30 + Math.round(n));
+        }
+    }
+    return null;
+}
+
+// 根据预计货好时间计算发货日期
+// planName: 计划名称，若包含"AGL"则取下一周的周二
+function calcShipDate(estimatedValue, planName) {
+    const d = parseDateValue(estimatedValue);
+    if (!d) return null;
+
+    if (planName && String(planName).includes('AGL')) {
+        // AGL计划：下一周的周二（跳过当前周）
+        const dayOfWeek = d.getDay(); // 0=周日, 1=周一, ..., 6=周六
+        const monBased = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // 0=周一, ..., 6=周日
+        const daysUntilNextMonday = 7 - monBased;
+        d.setDate(d.getDate() + daysUntilNextMonday + 1); // 下周一 + 1 = 下周二
+    } else {
+        // 默认：预计货好时间 + 2天
+        d.setDate(d.getDate() + 2);
+    }
+
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+}
+
 // 从对接表构建查询字典
 // dateCols: 按优先级排列的日期列索引数组，依次尝试直到取到有效日期
 function buildLookupTable(data, dataStartIdx, fbaCol, dateCols, factoryCol) {
@@ -542,8 +593,9 @@ function processFiles() {
         const planNameCol = findColumnIndex(erpHeaders, ['计划名称']);
         const boxSeqCol = findColumnIndex(erpHeaders, ['箱序']);
         const totalQtyCol = findColumnIndex(erpHeaders, ['总只数']);
+        const estimatedDateCol = findColumnIndex(erpHeaders, ['预计货好时间', '预计货好日期']);
 
-        log(`识别到：计划编号→列${planNoCol+1}(A=${String.fromCharCode(65+(planNoCol%26))}), 工厂代码→列${factoryCodeCol+1}`, 'info');
+        log(`识别到：计划编号→列${planNoCol+1}(A=${String.fromCharCode(65+(planNoCol%26))}), 工厂代码→列${factoryCodeCol+1}, 预计货好时间→列${estimatedDateCol >= 0 ? estimatedDateCol + 1 : '未找到'}`, 'info');
 
         if (planNoCol < 0 || factoryCodeCol < 0) {
             log('未识别到"计划编号"或"工厂代码"列，请检查ERP文件格式', 'error');
@@ -667,6 +719,7 @@ function processFiles() {
 
         // 数据行
         let matchCount = 0;
+        let calcCount = 0;   // 通过预计货好时间自动计算的行数
         let missCount = 0;
 
         for (let r = 1; r < erpData.length; r++) {
@@ -709,6 +762,12 @@ function processFiles() {
                     newRow[shipDateColIdx] = shipDate;
                     matchCount++;
                 } else {
+                    // 回退：用ERP表的预计货好时间计算发货日期
+                    const calcDate = calcShipDate(row[estimatedDateCol], row[planNameCol]);
+                    if (calcDate) {
+                        newRow[shipDateColIdx] = calcDate;
+                        calcCount++;
+                    }
                     missCount++;
                 }
             } else {
@@ -718,9 +777,10 @@ function processFiles() {
             newData.push(newRow);
         }
 
-        log(`匹配完成！成功: ${matchCount}行, 未匹配: ${missCount}行`, matchCount > 0 ? 'success' : 'warn');
+        const stillMiss = missCount - calcCount;
+        log(`匹配完成！对接表匹配: ${matchCount}行, 预计货好计算: ${calcCount}行, 仍缺失: ${stillMiss}行`, matchCount > 0 || calcCount > 0 ? 'success' : 'warn');
         if (missCount > 0) {
-            log(`有 ${missCount} 行未找到匹配的发货时间，这些行发货时间列为空`, 'warn');
+            log(`有 ${missCount} 行未找到匹配的发货时间（其中 ${calcCount} 行已通过预计货好时间自动计算）`, stillMiss > 0 ? 'warn' : 'info');
         }
 
         // ---- Step 5: 输出文件 ----
@@ -776,7 +836,8 @@ function processFiles() {
             <div class="stat-item"><div class="num">${erpData.length - 1}</div><div class="label">ERP数据行数</div></div>
             <div class="stat-item"><div class="num">${deleteCols.size}</div><div class="label">删除空/零列</div></div>
             <div class="stat-item"><div class="num">${totalNewCols - 1}</div><div class="label">保留列数</div></div>
-            <div class="stat-item"><div class="num">${matchCount}</div><div class="label">匹配成功</div></div>
+            <div class="stat-item"><div class="num">${matchCount}</div><div class="label">对接表匹配</div></div>
+            <div class="stat-item"><div class="num">${calcCount}</div><div class="label">预计货好计算</div></div>
             <div class="stat-item"><div class="num">${randNum}</div><div class="label">文件编号</div></div>
             <div class="stat-item"><div class="num">${outFileName}</div><div class="label">输出文件名</div></div>
         `;
