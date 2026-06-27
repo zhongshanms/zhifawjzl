@@ -724,6 +724,16 @@ function processFiles() {
 
         for (let r = 1; r < erpData.length; r++) {
             const row = erpData[r];
+
+            // 如果「总只数」为 0，跳过该行
+            if (totalQtyCol >= 0) {
+                const qtyVal = row[totalQtyCol];
+                if (qtyVal === 0 || qtyVal === '0' || String(qtyVal).trim() === '0') {
+                    log(`总只数为0，已跳过计划编号: ${row[planNoCol] != null ? String(row[planNoCol]).trim() : '(空)'}`, 'info');
+                    continue;
+                }
+            }
+
             const newRow = new Array(totalNewCols).fill(null);
 
             // 复制保留列
